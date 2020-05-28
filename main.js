@@ -9,8 +9,6 @@ var svg = d3.select("svg"),
 
 svg.attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`);
 
-var parseDate = d3.timeParse("%b %Y");
-
 var x = d3.scaleTime().range([0, width]),
     x2 = d3.scaleTime().range([0, width]),
     y = d3.scaleLinear().range([height, 0]),
@@ -58,8 +56,13 @@ var context = svg.append("g")
 	
 var identity = d3.zoomIdentity;
 
-d3.csv("sp500.csv", type, function(error, data) {
+d3.json("http://localhost:8080/ohlc/?chartEntityId=2190", function(error, json) {
   if (error) throw error;
+
+  data = json.map(item => ({
+    date: new Date(item.timeEpochTimestamp * 1000),
+    price: +item.closingPrice
+  }));
 
   x.domain(d3.extent(data, function(d) { return d.date; }));
   y.domain([0, d3.max(data, function(d) { return d.price; })]);
@@ -103,10 +106,17 @@ d3.csv("sp500.csv", type, function(error, data) {
       .call(zoom);
 });
 
+/*
+updates the scale using d3.zoomIdentity, it must do this as it needs to update the 
+zoom function to reflect the current zoom scale and transform.
+*/
 function brushed() {
+  /* check to see if the main body of the function should be executed */
   if (d3.event.sourceEvent && d3.event.sourceEvent.type === "zoom") return; // ignore brush-by-zoom
+  /* set a new x scale domain */
   var s = d3.event.selection || x2.range();
   x.domain(s.map(x2.invert, x2));
+  /* update the area and axis */
   focus.select(".area").attr("d", area);
   focus.select(".axis--x").call(xAxis);
   svg.select(".zoom").call(zoom.transform, d3.zoomIdentity
@@ -115,19 +125,19 @@ function brushed() {
 	  
 }
 
+/*
+manually sets the brush, it must do this because the brush needs to be updated.
+*/
 function zoomed() {
+  /* check to see if the main body of the function should be executed */
   if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
+  /* set a new x scale domain */
   var t = d3.event.transform;
   transform = t;
   console.log(d3.event.transform);
   x.domain(t.rescaleX(x2).domain());
+  /* update the area and axis */
   focus.select(".area").attr("d", area);
   focus.select(".axis--x").call(xAxis);
   context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
-}
-
-function type(d) {
-  d.date = parseDate(d.date);
-  d.price = +d.price;
-  return d;
 }
