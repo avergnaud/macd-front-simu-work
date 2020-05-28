@@ -28,17 +28,16 @@ var zoom = d3.zoom()
     .extent([[0, 0], [width, height]])
     .on("zoom", zoomed);
 
-var area = d3.area()
-    .curve(d3.curveMonotoneX)
-    .x(function(d) { return x(d.date); })
-    .y0(height)
-    .y1(function(d) { return y(d.price); });
+var closingPriceLine1 = d3.line()
+  .curve(d3.curveMonotoneX)
+  .x(function(d) { return x(d.date); })
+  .y(function(d) { return y(d.price); });
 
-var area2 = d3.area()
+
+var closingPriceLine2 = d3.line()
     .curve(d3.curveMonotoneX)
     .x(function(d) { return x2(d.date); })
-    .y0(height2)
-    .y1(function(d) { return y2(d.price); });
+    .y(function(d) { return y2(d.price); });
 
 svg.append("defs").append("clipPath")
     .attr("id", "clip")
@@ -56,7 +55,7 @@ var context = svg.append("g")
 	
 var identity = d3.zoomIdentity;
 
-d3.json("http://localhost:8080/ohlc/?chartEntityId=2190", function(error, json) {
+d3.json("http://localhost:8080/ohlc/?chartEntityId=9395", function(error, json) {
   if (error) throw error;
 
   data = json.map(item => ({
@@ -71,8 +70,8 @@ d3.json("http://localhost:8080/ohlc/?chartEntityId=2190", function(error, json) 
 
   focus.append("path")
       .datum(data)
-      .attr("class", "area")
-      .attr("d", area);
+      .attr("class", "line")
+      .attr("d", closingPriceLine1);
 
   focus.append("g")
       .attr("class", "axis axis--x")
@@ -85,8 +84,8 @@ d3.json("http://localhost:8080/ohlc/?chartEntityId=2190", function(error, json) 
 
   context.append("path")
       .datum(data)
-      .attr("class", "area")
-      .attr("d", area2);
+      .attr("class", "line")
+      .attr("d", closingPriceLine2);
 
   context.append("g")
       .attr("class", "axis axis--x")
@@ -116,8 +115,8 @@ function brushed() {
   /* set a new x scale domain */
   var s = d3.event.selection || x2.range();
   x.domain(s.map(x2.invert, x2));
-  /* update the area and axis */
-  focus.select(".area").attr("d", area);
+  /* update the closingPriceLine1 and axis */
+  focus.select(".line").attr("d", closingPriceLine1);
   focus.select(".axis--x").call(xAxis);
   svg.select(".zoom").call(zoom.transform, d3.zoomIdentity
       .scale(width / (s[1] - s[0]))
@@ -134,10 +133,10 @@ function zoomed() {
   /* set a new x scale domain */
   var t = d3.event.transform;
   transform = t;
-  console.log(d3.event.transform);
   x.domain(t.rescaleX(x2).domain());
-  /* update the area and axis */
-  focus.select(".area").attr("d", area);
+  console.log(x.domain());
+  /* update the closingPriceLine1 and axis */
+  focus.select(".line").attr("d", closingPriceLine1);
   focus.select(".axis--x").call(xAxis);
   context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
 }
