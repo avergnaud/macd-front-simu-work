@@ -1,5 +1,4 @@
 
-
 var svg = d3.select("svg"),
     margin = {top: 20, right: 20, bottom: 110, left: 40},
     margin2 = {top: 430, right: 20, bottom: 30, left: 40},
@@ -26,18 +25,18 @@ var zoom = d3.zoom()
     .scaleExtent([1, Infinity])
     .translateExtent([[0, 0], [width, height]])
     .extent([[0, 0], [width, height]])
-    .on("zoom", zoomed);
+    /*.on("zoom", zoomed)*/;
 
 var closingPriceLine1 = d3.line()
   .curve(d3.curveMonotoneX)
   .x(function(d) { return x(d.date); })
-  .y(function(d) { return y(d.price); });
+  .y(function(d) { return y(d.closingPrice); });
 
 
 var closingPriceLine2 = d3.line()
     .curve(d3.curveMonotoneX)
     .x(function(d) { return x2(d.date); })
-    .y(function(d) { return y2(d.price); });
+    .y(function(d) { return y2(d.closingPrice); });
 
 svg.append("defs").append("clipPath")
     .attr("id", "clip")
@@ -55,16 +54,36 @@ var context = svg.append("g")
 	
 var identity = d3.zoomIdentity;
 
-d3.json("http://localhost:8080/ohlc/?chartEntityId=9395", function(error, json) {
+/*
+Promise.all([
+  fetch("http://localhost:8080/ohlc/?chartEntityId=9395"),
+  fetch("http://localhost:8080/macd/?macdDefinitionId=9394")
+])
+.then(async ([ohlcData, macdData]) => {
+  const ohlcJson = await ohlcData.json();
+  const macdJson = await macdData.json();
+  return [ohlcJson, macdJson];
+})
+.then(([ohlcJson, macdJson]) =>  {
+*/
+const yAxisG = focus.append("g")
+      .attr("class", "axis axis--y");
+
+
+d3.json(/*"http://localhost:8080/ohlc/?chartEntityId=9395"*/
+          "http://localhost:8080/macd/?macdDefinitionId=9394"
+          , function(error, json) {
   if (error) throw error;
 
-  data = json.map(item => ({
-    date: new Date(item.timeEpochTimestamp * 1000),
-    price: +item.closingPrice
+  let data = json.map(item => ({
+    ...item,
+    date: new Date(item.timeEpochTimestamp * 1000)
   }));
 
+  zoom.on("zoom", () => zoomed(data));
+
   x.domain(d3.extent(data, function(d) { return d.date; }));
-  y.domain([0, d3.max(data, function(d) { return d.price; })]);
+  y.domain([0, d3.max(data, function(d) { return d.closingPrice; })]);
   x2.domain(x.domain());
   y2.domain(y.domain());
 
@@ -78,8 +97,7 @@ d3.json("http://localhost:8080/ohlc/?chartEntityId=9395", function(error, json) 
       .attr("transform", "translate(0," + height + ")")
       .call(xAxis);
 
-  focus.append("g")
-      .attr("class", "axis axis--y")
+  yAxisG
       .call(yAxis);
 
   context.append("path")
@@ -104,6 +122,7 @@ d3.json("http://localhost:8080/ohlc/?chartEntityId=9395", function(error, json) 
       .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
       .call(zoom);
 });
+/*.catch(error => console.log(error));*/
 
 /*
 updates the scale using d3.zoomIdentity, it must do this as it needs to update the 
@@ -127,16 +146,30 @@ function brushed() {
 /*
 manually sets the brush, it must do this because the brush needs to be updated.
 */
-function zoomed() {
+function zoomed(json) {
+  
   /* check to see if the main body of the function should be executed */
   if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
   /* set a new x scale domain */
   var t = d3.event.transform;
   transform = t;
   x.domain(t.rescaleX(x2).domain());
-  console.log(x.domain());
+
+  /* visibleData: data to compute MACD */
+  const [dateMin, dateMax] = x.domain();
+  let visibleData = json.slice();
+  visibleData.sort((a,b) => (b.timeEpochTimestamp - a.timeEpochTimestamp));
+  visibleData = visibleData.filter((element, index) => (
+    dateMin <= element.date && element.date <= dateMax
+  ));
+  /* updates y scale for the main graph */
+  y.domain([0, d3.max(visibleData, d => d.closingPrice)]);
+  yAxisG.call(yAxis);
+
   /* update the closingPriceLine1 and axis */
+  closingPriceLine1.y(function(d) { return y(d.closingPrice); });
   focus.select(".line").attr("d", closingPriceLine1);
   focus.select(".axis--x").call(xAxis);
   context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
+
 }
