@@ -54,26 +54,18 @@ var context = svg.append("g")
 	
 var identity = d3.zoomIdentity;
 
-/*
-Promise.all([
-  fetch("http://localhost:8080/ohlc/?chartEntityId=9395"),
-  fetch("http://localhost:8080/macd/?macdDefinitionId=9394")
-])
-.then(async ([ohlcData, macdData]) => {
-  const ohlcJson = await ohlcData.json();
-  const macdJson = await macdData.json();
-  return [ohlcJson, macdJson];
-})
-.then(([ohlcJson, macdJson]) =>  {
-*/
 const yAxisG = focus.append("g")
       .attr("class", "axis axis--y");
 
+const yMargin = 30;
 
-d3.json(/*"http://localhost:8080/ohlc/?chartEntityId=9395"*/
-          "http://localhost:8080/macd/?macdDefinitionId=9394"
-          , function(error, json) {
+d3.json("http://localhost:8080/macd/?macdDefinitionId=9394", function(error, json) {
   if (error) throw error;
+
+  /* skip the first incomplete items (before 12+26+9) */
+  json = json.filter(item => (
+    item.macdValue && item.signalValue
+  ));
 
   let data = json.map(item => ({
     ...item,
@@ -83,7 +75,9 @@ d3.json(/*"http://localhost:8080/ohlc/?chartEntityId=9395"*/
   zoom.on("zoom", () => zoomed(data));
 
   x.domain(d3.extent(data, function(d) { return d.date; }));
-  y.domain([0, d3.max(data, function(d) { return d.closingPrice; })]);
+  let yMin = d3.min(data, d => d.closingPrice) - yMargin;
+  let yMax = d3.max(data, d => d.closingPrice) + yMargin;
+  y.domain([yMin, yMax]);
   x2.domain(x.domain());
   y2.domain(y.domain());
 
@@ -97,8 +91,7 @@ d3.json(/*"http://localhost:8080/ohlc/?chartEntityId=9395"*/
       .attr("transform", "translate(0," + height + ")")
       .call(xAxis);
 
-  yAxisG
-      .call(yAxis);
+  yAxisG.call(yAxis);
 
   context.append("path")
       .datum(data)
@@ -122,7 +115,6 @@ d3.json(/*"http://localhost:8080/ohlc/?chartEntityId=9395"*/
       .attr("transform", "translate(" + margin.left + "," + margin.top + ")")
       .call(zoom);
 });
-/*.catch(error => console.log(error));*/
 
 /*
 updates the scale using d3.zoomIdentity, it must do this as it needs to update the 
@@ -147,7 +139,7 @@ function brushed() {
 manually sets the brush, it must do this because the brush needs to be updated.
 */
 function zoomed(json) {
-  
+
   /* check to see if the main body of the function should be executed */
   if (d3.event.sourceEvent && d3.event.sourceEvent.type === "brush") return; // ignore zoom-by-brush
   /* set a new x scale domain */
@@ -158,12 +150,14 @@ function zoomed(json) {
   /* visibleData: data to compute MACD */
   const [dateMin, dateMax] = x.domain();
   let visibleData = json.slice();
-  visibleData.sort((a,b) => (b.timeEpochTimestamp - a.timeEpochTimestamp));
+  visibleData.sort((a,b) => (a.timeEpochTimestamp - b.timeEpochTimestamp));
   visibleData = visibleData.filter((element, index) => (
     dateMin <= element.date && element.date <= dateMax
   ));
   /* updates y scale for the main graph */
-  y.domain([0, d3.max(visibleData, d => d.closingPrice)]);
+  let yMin = d3.min(visibleData, d => d.closingPrice) - yMargin;
+  let yMax = d3.max(visibleData, d => d.closingPrice) + yMargin;
+  y.domain([yMin, yMax]);
   yAxisG.call(yAxis);
 
   /* update the closingPriceLine1 and axis */
@@ -172,4 +166,43 @@ function zoomed(json) {
   focus.select(".axis--x").call(xAxis);
   context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
 
+  let eurBalance;
+  let cryptoBalance;
+  let totalBalance;
+  const initalBalance = 100;
+  const fees = 0.0026;
+  let isEur = visibleData[0].macdValue < visibleData[0].signalValue;
+  /* initial balance */
+  if(isEur) {
+    eurBalance = initalBalance;
+    cryptoBalance = 0;
+  } else {
+    eurBalance = 0;
+    cryptoBalance = initalBalance / visibleData[0].closingPrice;
+  }
+  totalBalance = initalBalance;
+
+  for(const item of visibleData) {
+    let newIsEur = item.macdValue < item.signalValue;
+    /* case 1 : same state */
+    if(newIsEur === isEur) {
+      continue;
+    } else if (newIsEur) {
+      /* case 2 : state change; SELL SIGNAL */
+      let payedFees = (cryptoBalance * item.closingPrice) * fees;
+      eurBalance = cryptoBalance * item.closingPrice - payedFees;
+      totalBalance = eurBalance;
+      cryptoBalance = 0;
+    } else {
+      /* case 3: state change, BUY SIGNAL */
+      let payedFees = eurBalance * fees;
+      eurBalance = eurBalance - payedFees;
+      totalBalance = eurBalance;
+      cryptoBalance = eurBalance / item.closingPrice;
+      eurBalance = 0;
+    }
+    /* update portfolio State */
+    isEur = newIsEur;
+  }
+  console.log(`totalBalance ${totalBalance}`);
 }
