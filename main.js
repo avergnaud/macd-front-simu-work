@@ -1,7 +1,7 @@
 
 var svg = d3.select("svg"),
-    margin = {top: 20, right: 20, bottom: 110, left: 40},
-    margin2 = {top: 430, right: 20, bottom: 30, left: 40},
+    margin = {top: 20, right: 30, bottom: 110, left: 40},
+    margin2 = {top: 430, right: 30, bottom: 30, left: 40},
     width = 960 - margin.left - margin.right,
     height = 500 - margin.top - margin.bottom,
     height2 = 500- margin2.top - margin2.bottom;
@@ -9,13 +9,15 @@ var svg = d3.select("svg"),
 svg.attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`);
 
 var x = d3.scaleTime().range([0, width]),
-    x2 = d3.scaleTime().range([0, width]),
     y = d3.scaleLinear().range([height, 0]),
+    yBalance = d3.scaleLinear().range([height, 0]),
+    x2 = d3.scaleTime().range([0, width]),
     y2 = d3.scaleLinear().range([height2, 0]);
 
 var xAxis = d3.axisBottom(x),
-    xAxis2 = d3.axisBottom(x2),
-    yAxis = d3.axisLeft(y);
+    yAxisLeft = d3.axisLeft(y),
+    yAxisRight = d3.axisRight(yBalance),
+    xAxis2 = d3.axisBottom(x2);
 
 var brush = d3.brushX()
     .extent([[0, 0], [width, height2]])
@@ -31,7 +33,6 @@ var closingPriceLine1 = d3.line()
   .curve(d3.curveMonotoneX)
   .x(function(d) { return x(d.date); })
   .y(function(d) { return y(d.closingPrice); });
-
 
 var closingPriceLine2 = d3.line()
     .curve(d3.curveMonotoneX)
@@ -57,6 +58,10 @@ var identity = d3.zoomIdentity;
 const yAxisG = focus.append("g")
       .attr("class", "axis axis--y");
 
+const yAxisRightG = focus.append("g")
+    .attr("class", "y axis")
+    .attr("transform", "translate(" + width + " ,0)");
+
 const yMargin = 30;
 
 d3.json("http://localhost:8080/macd/?macdDefinitionId=9394", function(error, json) {
@@ -78,6 +83,7 @@ d3.json("http://localhost:8080/macd/?macdDefinitionId=9394", function(error, jso
   let yMin = d3.min(data, d => d.closingPrice) - yMargin;
   let yMax = d3.max(data, d => d.closingPrice) + yMargin;
   y.domain([yMin, yMax]);
+  yBalance.domain([0, 100]);
   x2.domain(x.domain());
   y2.domain(y.domain());
 
@@ -91,7 +97,8 @@ d3.json("http://localhost:8080/macd/?macdDefinitionId=9394", function(error, jso
       .attr("transform", "translate(0," + height + ")")
       .call(xAxis);
 
-  yAxisG.call(yAxis);
+  yAxisG.call(yAxisLeft);
+  yAxisRightG.call(yAxisRight);
 
   context.append("path")
       .datum(data)
@@ -158,14 +165,15 @@ function zoomed(json) {
   let yMin = d3.min(visibleData, d => d.closingPrice) - yMargin;
   let yMax = d3.max(visibleData, d => d.closingPrice) + yMargin;
   y.domain([yMin, yMax]);
-  yAxisG.call(yAxis);
+  yAxisG.call(yAxisLeft);
 
   /* update the closingPriceLine1 and axis */
   closingPriceLine1.y(function(d) { return y(d.closingPrice); });
   focus.select(".line").attr("d", closingPriceLine1);
   focus.select(".axis--x").call(xAxis);
-  context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
+  
 
+  /* update the balance line */
   let eurBalance;
   let cryptoBalance;
   let totalBalance;
@@ -186,9 +194,10 @@ function zoomed(json) {
     let newIsEur = item.macdValue < item.signalValue;
     /* case 1 : same state */
     if(newIsEur === isEur) {
+      item.balance = totalBalance;
       continue;
     } else if (newIsEur) {
-      /* case 2 : state change; SELL SIGNAL */
+      /* case 2 : state change, SELL SIGNAL */
       let payedFees = (cryptoBalance * item.closingPrice) * fees;
       eurBalance = cryptoBalance * item.closingPrice - payedFees;
       totalBalance = eurBalance;
@@ -203,6 +212,38 @@ function zoomed(json) {
     }
     /* update portfolio State */
     isEur = newIsEur;
+    item.balance = totalBalance;
   }
-  console.log(`totalBalance ${totalBalance}`);
+
+  let yBalanceMax = d3.max(visibleData, d => d.balance);
+  yBalance.domain([0, yBalanceMax]);
+  yAxisRightG.call(yAxisRight);
+  
+  var balanceLine = d3.line()
+    .x(function(d) { return x(d.date); })
+    .y(function(d) { return yBalance(d.balance); });
+
+  focus.selectAll(".balance-line").remove()
+  focus.append("path")
+    .datum(visibleData)
+    .attr("class", "balance-line")
+    .attr("d", balanceLine);
+
+  let botPerformance = performance(initalBalance, totalBalance);
+
+  const initialClosingPrice = visibleData[0].closingPrice;
+  const finalClosingPrice = visibleData[visibleData.length - 1].closingPrice;
+  let marketPerformance = performance(initialClosingPrice, finalClosingPrice);
+    
+  document.getElementById("titre").innerHTML = `${botPerformance}% / ${marketPerformance}%`;
+
+  context.select(".brush").call(brush.move, x.range().map(t.invertX, t));
+}
+
+function performance(from, to) {
+  let diff = ((to - from) / from * 100).toFixed(0);
+  if(diff > 0) {
+    diff = '+' + diff;
+  }
+  return diff;
 }
